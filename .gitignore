@@ -1,3 +1,6 @@
 shaders_cache/
 history.txt
 bookmarker.json
+
+scripts/sponsorblock_shared/database.db
+scripts/sponsorblock_shared/sponsorblock.db.tmp

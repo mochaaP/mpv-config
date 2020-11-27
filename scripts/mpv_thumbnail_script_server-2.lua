@@ -462,7 +462,7 @@ local thumbnailer_options = {
 
 read_options(thumbnailer_options, SCRIPT_NAME)
 --[ FileConcat-E src/options.lua HASH:43289ede028e21aaafa333306430507752fcc218de48b5aac9b89a2b2ba64da2 ]--
---[ FileConcat-S src/thumbnailer_server.lua HASH:21bddbc128bd4957b895d159ba5e01ce4b4b6d679d1478a18345b1c842207021 ]--
+--[ FileConcat-S src/thumbnailer_server.lua HASH:46733b227076eae5d2d1a21eed4b7e2d2b43c5eec66850c2b903f97d981f0cce ]--
 function skip_nil(tbl)
     local n = {}
     for k, v in pairs(tbl) do
@@ -478,7 +478,7 @@ function create_thumbnail_mpv(file_path, timestamp, size, output_path, options)
                                                        or thumbnailer_options.remote_direct_stream)
 
     local header_fields_arg = nil
-    local header_fields = mp.get_property_native("http-header-fields")
+    local header_fields = mp.get_property_native("http-header-fields", {})
     if #header_fields > 0 then
         -- We can't escape the headers, mpv won't parse "--http-header-fields='Name: value'" properly
         header_fields_arg = "--http-header-fields=" .. table.concat(header_fields, ",")
@@ -501,8 +501,8 @@ function create_thumbnail_mpv(file_path, timestamp, size, output_path, options)
         -- Pass HTTP headers from current instance
         header_fields_arg,
         -- Pass User-Agent and Referer - should do no harm even with ytdl active
-        "--user-agent=" .. mp.get_property_native("user-agent"),
-        "--referrer=" .. mp.get_property_native("referrer"),
+        "--user-agent=" .. mp.get_property_native("user-agent", ""),
+        "--referrer=" .. mp.get_property_native("referrer", ""),
         -- Disable hardware decoding
         "--hwdec=no",
 
@@ -594,6 +594,7 @@ function do_worker_job(state_json_string, frames_json_string)
         msg.error("Failed to parse state JSON")
         return
     end
+    local state_id = thumb_state.id
 
     local thumbnail_indexes, err = utils.parse_json(frames_json_string)
     if err then
@@ -611,6 +612,11 @@ function do_worker_job(state_json_string, frames_json_string)
     end
 
     local file_duration = mp.get_property_native("duration")
+    -- Bail if we get a nil duration
+    if not file_duration then
+      return
+    end
+
     local file_path = thumb_state.worker_input_path
 
     if thumb_state.is_remote then
@@ -629,7 +635,7 @@ function do_worker_job(state_json_string, frames_json_string)
         -- Grab the "middle" of the thumbnail duration instead of the very start, and leave some margin in the end
         local timestamp = math.min(file_duration - 0.25, (thumb_idx + 0.5) * thumb_state.thumbnail_delta)
 
-        mp.commandv("script-message", "mpv_thumbnail_script-progress", tostring(thumbnail_index))
+        mp.commandv("script-message", "mpv_thumbnail_script-progress", tostring(state_id), tostring(thumbnail_index))
 
         -- The expected size (raw BGRA image)
         local thumbnail_raw_size = (thumb_state.thumbnail_size.w * thumb_state.thumbnail_size.h * 4)
@@ -694,7 +700,7 @@ function do_worker_job(state_json_string, frames_json_string)
         end
 
         msg.debug("Finished work on thumbnail", thumb_idx)
-        mp.commandv("script-message", "mpv_thumbnail_script-ready", tostring(thumbnail_index), thumbnail_path)
+        mp.commandv("script-message", "mpv_thumbnail_script-ready", tostring(state_id), tostring(thumbnail_index), thumbnail_path)
     end
 
     msg.debug(("Generating %d thumbnails @ %dx%d for %q"):format(
@@ -736,4 +742,4 @@ mp.register_script_message("mpv_thumbnail_script-slaved", function()
     msg.debug("Successfully registered with master")
     register_timer:stop()
 end)
---[ FileConcat-E src/thumbnailer_server.lua HASH:21bddbc128bd4957b895d159ba5e01ce4b4b6d679d1478a18345b1c842207021 ]--
+--[ FileConcat-E src/thumbnailer_server.lua HASH:46733b227076eae5d2d1a21eed4b7e2d2b43c5eec66850c2b903f97d981f0cce ]--

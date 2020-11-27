@@ -4,3 +4,4 @@ bookmarker.json
 
 scripts/sponsorblock_shared/database.db
 scripts/sponsorblock_shared/sponsorblock.db.tmp
+scripts/sponsorblock_shared/sponsorblock.db

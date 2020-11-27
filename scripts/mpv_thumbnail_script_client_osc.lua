@@ -796,11 +796,14 @@ local thumbnailer_options = {
 
 read_options(thumbnailer_options, SCRIPT_NAME)
 --[ FileConcat-E src/options.lua HASH:43289ede028e21aaafa333306430507752fcc218de48b5aac9b89a2b2ba64da2 ]--
---[ FileConcat-S src/thumbnailer_shared.lua HASH:266779fe3fdf84e07039920995601519286ce8dadc2ad2f56a6f08e63a28a9ae ]--
+--[ FileConcat-S src/thumbnailer_shared.lua HASH:c8cfe9791bcd6e70577f5b465004d2d49de267fbb140bada69994f4611a8a0bc ]--
 local Thumbnailer = {
     cache_directory = thumbnailer_options.cache_directory,
 
     state = {
+        -- Used to make sure updates sent to us by workers correspond to the
+        -- current state (the video hasn't changed)
+        id = 0,
         ready = false,
         available = false,
         enabled = false,
@@ -832,7 +835,10 @@ local Thumbnailer = {
 }
 
 function Thumbnailer:clear_state()
+    local prev_state_id = self.state.id
+
     clear_table(self.state)
+    self.state.id = prev_state_id + 1
     self.state.ready = false
     self.state.available = false
     self.state.finished_thumbnails = 0
@@ -845,7 +851,11 @@ function Thumbnailer:on_file_loaded()
     self:clear_state()
 end
 
-function Thumbnailer:on_thumb_ready(index)
+function Thumbnailer:on_thumb_ready(state_id, index)
+    if self.state.id ~= state_id then
+      return
+    end
+
     self.state.thumbnails[index] = 1
 
     -- Full recount instead of a naive increment (let's be safe!)
@@ -857,7 +867,11 @@ function Thumbnailer:on_thumb_ready(index)
     end
 end
 
-function Thumbnailer:on_thumb_progress(index)
+function Thumbnailer:on_thumb_progress(state_id, index)
+    if self.state.id ~= state_id then
+      return
+    end
+
     self.state.thumbnails[index] = math.max(self.state.thumbnails[index], 0)
 end
 
@@ -892,13 +906,13 @@ function Thumbnailer:update_state()
 
     self.state.ready = true
 
-    local file_path = mp.get_property_native("path")
+    local file_path = mp.get_property_native("path", "")
     self.state.is_remote = file_path:find("://") ~= nil
 
     self.state.available = false
 
     -- Make sure the file has video (and not just albumart)
-    local track_list = mp.get_property_native("track-list")
+    local track_list = mp.get_property_native("track-list", {})
     local has_video = false
     for i, track in pairs(track_list) do
         if track.type == "video" and not track.external and not track.albumart then
@@ -917,10 +931,10 @@ end
 
 
 function Thumbnailer:get_thumbnail_template()
-    local file_path = mp.get_property_native("path")
+    local file_path = mp.get_property_native("path", "")
     local is_remote = file_path:find("://") ~= nil
 
-    local filename = mp.get_property_native("filename/no-ext")
+    local filename = mp.get_property_native("filename/no-ext", "")
     local filesize = mp.get_property_native("file-size", 0)
 
     if is_remote then
@@ -942,7 +956,7 @@ end
 
 
 function Thumbnailer:get_thumbnail_size()
-    local video_dec_params = mp.get_property_native("video-dec-params")
+    local video_dec_params = mp.get_property_native("video-dec-params", {})
     local video_width = video_dec_params.dw
     local video_height = video_dec_params.dh
     if not (video_width and video_height) then
@@ -962,7 +976,7 @@ end
 
 
 function Thumbnailer:get_delta()
-    local file_path = mp.get_property_native("path")
+    local file_path = mp.get_property_native("path", "")
     local file_duration = mp.get_property_native("duration")
     local is_seekable = mp.get_property_native("seekable")
 
@@ -1000,8 +1014,8 @@ function Thumbnailer:get_thumbnail_count(delta)
     if delta == nil then
         return 0
     end
-    local file_duration = mp.get_property_native("duration")
 
+    local file_duration = mp.get_property_native("duration", 0)
     return math.ceil(file_duration / delta)
 end
 
@@ -1058,11 +1072,11 @@ end
 function Thumbnailer:register_client()
     self.worker_register_timeout = mp.get_time() + 2
 
-    mp.register_script_message("mpv_thumbnail_script-ready", function(index, path)
-        self:on_thumb_ready(tonumber(index), path)
+    mp.register_script_message("mpv_thumbnail_script-ready", function(state_id, index, path)
+        self:on_thumb_ready(tonumber(state_id), tonumber(index), path)
     end)
-    mp.register_script_message("mpv_thumbnail_script-progress", function(index, path)
-        self:on_thumb_progress(tonumber(index), path)
+    mp.register_script_message("mpv_thumbnail_script-progress", function(state_id, index, path)
+        self:on_thumb_progress(tonumber(state_id), tonumber(index), path)
     end)
 
     mp.register_script_message("mpv_thumbnail_script-worker", function(worker_name)
@@ -1083,8 +1097,6 @@ function Thumbnailer:register_client()
             -- Notify if autogenerate is on and video is not too long
             if duration < max_duration or max_duration == 0 then
                 self:start_worker_jobs()
-            else
-                mp.osd_message("[Alt+t] to thumbnail")
             end
         end
     end)
@@ -1121,13 +1133,13 @@ function Thumbnailer:_create_thumbnail_job_order()
 end
 
 function Thumbnailer:prepare_source_path()
-    local file_path = mp.get_property_native("path")
+    local file_path = mp.get_property_native("path", "")
 
     if self.state.is_remote and thumbnailer_options.remote_direct_stream then
         -- Use the direct stream (possibly) provided by ytdl
         -- This skips ytdl on the sub-calls, making the thumbnailing faster
         -- Works well on YouTube, rest not really tested
-        file_path = mp.get_property_native("stream-path")
+        file_path = mp.get_property_native("stream-path", "")
 
         -- edl:// urls can get LONG. In which case, save the path (URL)
         -- to a temporary file and use that instead.
@@ -1137,7 +1149,7 @@ function Thumbnailer:prepare_source_path()
             -- Path is too long for a playlist - just pass the original URL to
             -- workers and allow ytdl
             self.state.worker_extra.enable_ytdl = true
-            file_path = mp.get_property_native("path")
+            file_path = mp.get_property_native("path", "")
             msg.warn("Falling back to original URL and ytdl due to LONG source path. This will be slow.")
 
         elseif #file_path > 1024 then
@@ -1172,7 +1184,7 @@ function Thumbnailer:start_worker_jobs()
         return
     end
 
-    local worker_list = {}
+    local worker_list = { state_id = self.state.id }
     for worker_name in pairs(self.workers) do table.insert(worker_list, worker_name) end
 
     local worker_count = #worker_list
@@ -1231,8 +1243,8 @@ end
 
 mp.register_event("start-file", function() Thumbnailer:on_start_file() end)
 mp.observe_property("video-dec-params", "native", function(name, params) Thumbnailer:on_video_change(params) end)
---[ FileConcat-E src/thumbnailer_shared.lua HASH:266779fe3fdf84e07039920995601519286ce8dadc2ad2f56a6f08e63a28a9ae ]--
---[ FileConcat-S src/patched_osc.lua HASH:2ffc37547b31e03b2c5baf3eb77921da9a5ad0169933c6aa51ba5944b8563b17 ]--
+--[ FileConcat-E src/thumbnailer_shared.lua HASH:c8cfe9791bcd6e70577f5b465004d2d49de267fbb140bada69994f4611a8a0bc ]--
+--[ FileConcat-S src/patched_osc.lua HASH:767890e42d5f7d587b3d11535a314dd2363d8697ca6a800902ea77c723f24de7 ]--
 --[[
 This is mpv's original player/lua/osc.lua patched to display thumbnails
 
@@ -1245,11 +1257,9 @@ local msg = require 'mp.msg'
 local opt = require 'mp.options'
 local utils = require 'mp.utils'
 
-
 --
 -- Parameters
 --
-
 -- default user option values
 -- do not touch, change them in osc.conf
 local user_opts = {
@@ -1286,7 +1296,6 @@ local user_opts = {
     tooltipborder = 1,          -- border of tooltip in bottom/topbar
     timetotal = false,          -- display total time instead of remaining time?
     timems = false,             -- display timecodes with milliseconds?
-    seekranges = true,          -- display seek ranges?
     visibility = "auto",        -- only used at init to set visibility_mode(...)
     boxmaxchars = 80,           -- title crop threshold for box layout
     boxvideo = false,           -- apply osc_param.video_margins to video
@@ -1305,6 +1314,20 @@ if user_opts.hidetimeout < 0 then
     msg.warn("hidetimeout cannot be negative. Using " .. user_opts.hidetimeout)
 end
 
+-- validate window control options
+if user_opts.windowcontrols ~= "auto" and
+   user_opts.windowcontrols ~= "yes" and
+   user_opts.windowcontrols ~= "no" then
+    msg.warn("windowcontrols cannot be \"" ..
+             user_opts.windowcontrols .. "\". Ignoring.")
+    user_opts.windowcontrols = "auto"
+end
+if user_opts.windowcontrols_alignment ~= "right" and
+   user_opts.windowcontrols_alignment ~= "left" then
+    msg.warn("windowcontrols_alignment cannot be \"" ..
+             user_opts.windowcontrols_alignment .. "\". Ignoring.")
+    user_opts.windowcontrols_alignment = "right"
+end
 
 -- mpv_thumbnail_script.lua --
 
@@ -1530,7 +1553,6 @@ function display_thumbnail(pos, value, ass)
 end
 
 -- // mpv_thumbnail_script.lua // --
-
 
 local osc_param = { -- calculated by osc_init()
     playresy = 0,                           -- canvas size Y
@@ -1959,7 +1981,6 @@ function prepare_elements()
             ass_draw_rr_h_cw(static_ass, 0, 0, elem_geo.w, elem_geo.h,
                              element.layout.box.radius, element.layout.box.hexagon)
             static_ass:draw_stop()
-
 
         elseif (element.type == "slider") then
             --draw static slider parts
@@ -4049,6 +4070,12 @@ function tick()
     if state.anitype ~= nil then
         request_tick()
     end
+
+    state.tick_last_time = mp.get_time()
+
+    if state.anitype ~= nil then
+        request_tick()
+    end
 end
 
 function do_enable_keybindings()
@@ -4089,7 +4116,6 @@ end
 
 -- // mpv_thumbnail_script.lua // --
 
-
 validate_user_opts()
 
 mp.register_event("shutdown", shutdown)
@@ -4128,6 +4154,18 @@ mp.observe_property("window-maximized", "bool",
     function(name, val)
         state.maximized = val
         request_init_resize()
+    end
+)
+mp.observe_property("border", "bool",
+    function(name, val)
+        state.border = val
+        request_init()
+    end
+)
+mp.observe_property("window-maximized", "bool",
+    function(name, val)
+        state.maximized = val
+        request_init()
     end
 )
 mp.observe_property("idle-active", "bool",
@@ -4252,4 +4290,4 @@ mp.add_key_binding(nil, "visibility", function() visibility_mode("cycle") end)
 
 set_virt_mouse_area(0, 0, 0, 0, "input")
 set_virt_mouse_area(0, 0, 0, 0, "window-controls")
---[ FileConcat-E src/patched_osc.lua HASH:2ffc37547b31e03b2c5baf3eb77921da9a5ad0169933c6aa51ba5944b8563b17 ]--
+--[ FileConcat-E src/patched_osc.lua HASH:767890e42d5f7d587b3d11535a314dd2363d8697ca6a800902ea77c723f24de7 ]--

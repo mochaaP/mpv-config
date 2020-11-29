@@ -64,49 +64,53 @@ if (PathTools.getPathInfo(mp.utils.get_user_path('~~/marker.json')) !== 'file') 
 
 var marks = readBookmark()
 
-function showMenu() {
-  function loadFile(file, pos) {
-    var path = mp.get_property('path')
-    if (PathTools.isWebURL(file) || PathTools.getPathInfo(file) === 'file') {
-      if (file === path) {
-        mp.set_property_number('time-pos', pos)
-      } else {
-        mp.commandv('loadfile', file, 'replace', 'start=' + pos);
-      }
+function loadFile(file, pos) {
+  var path = mp.get_property('path')
+  if (PathTools.isWebURL(file) || PathTools.getPathInfo(file) === 'file') {
+    if (file === path) {
+      mp.set_property_number('time-pos', pos)
+    } else {
+      mp.commandv('loadfile', file, 'replace', 'start=' + pos);
     }
   }
+}
 
+function showMenu() {
   function mainMenu() {
     readBookmark()
     menu.setTitle('Bookmarks' + (isEmpty(marks) ? ' (Empty)' : ''));
     menu.setOptions(marks.map(function(x) {
       var lastPos = x.position[x.position.length - 1]
       return x.name + ' @ ' + posToStamp(lastPos)
-    }));
+    }).reverse());
     menu.setCallbackMenuOpen(function() {
-      var mark = marks[menu.selectionIdx]
+      var sel = marks.length - 1 - menu.selectionIdx
+      var mark = marks[sel]
       menu.hideMenu();
       menu.showMessage('Jumping: ' + mark.name);
       loadFile(mark.path, mark.position[mark.position.length - 1]);
     })
     menu.setCallbackMenuUndo(function() {
-      marks.splice(menu.selectionIdx, 1);
+      var sel = marks.length - 1 - menu.selectionIdx
+      marks.splice(sel, 1);
       writeBookmark(marks);
       mainMenu();
     })
 
     menu.setCallbackMenuLeft(menu.hideMenu);
     menu.setCallbackMenuRight(function() {
-      jumpMenu(marks[menu.selectionIdx], menu.selectionIdx)
+      var sel = marks.length - 1 - menu.selectionIdx
+      jumpMenu(marks[sel], sel)
     })
     menu.renderMenu();
   }
   
   function jumpMenu(mark, id) {
     menu.setTitle('Jump To @ ' + mark.name);
-    menu.setOptions(mark.position.map(posToStamp));
+    menu.setOptions(mark.position.map(posToStamp).reverse());
     menu.setCallbackMenuOpen(function() {
-      var pos = mark.position[menu.selectionIdx]
+      var sel = mark.position.map - 1 - menu.selectionIdx
+      var pos = mark.position[sel]
       menu.hideMenu();
       menu.showMessage('Jumping: ' + mark.name + ' @ ' + posToStamp(pos));
       loadFile(mark.path, pos);
@@ -115,7 +119,8 @@ function showMenu() {
     menu.setCallbackMenuRight();
     menu.setCallbackMenuUndo(function() {
       if (mark.position.length > 1) {
-        mark.position.splice(menu.selectionIdx, 1);
+        var sel = mark.position.map - 1 - menu.selectionIdx
+        mark.position.splice(sel, 1);
         writeBookmark(marks);
         jumpMenu(marks[id], id);
       } else {
@@ -154,10 +159,11 @@ function saveBookmark() {
     if (empty) {
       marks.push(mark);
       writeBookmark(marks);
-      mp.osd_message('Bookmark created at ' + mark.name + ' @ ' + posToStamp(pos) + '[Slot ' + mark.position.length + ']')
+      mp.osd_message('Bookmark created at ' + mark.name + ' @ ' + posToStamp(pos) + ' [Slot ' + mark.position.length + ']')
     } else {
+      marks.push(marks.splice(marks.indexOf(mark), 1)[0]);
       writeBookmark(marks);
-      mp.osd_message('Bookmark added at ' + mark.name + ' @ ' + posToStamp(pos) + '[Slot ' + mark.position.length + ']')
+      mp.osd_message('Bookmark added at ' + mark.name + ' @ ' + posToStamp(pos) + ' [Slot ' + mark.position.length + ']')
     }
     menu.hideMenu()
   } else {
@@ -177,11 +183,20 @@ function loadBookmark() {
       loadFile(mark.path, pos);
       menu.hideMenu()
     }
+  } else if (!isEmpty(marks)) {
+    var mark = marks[marks.length - 1]
+    var pos = mark.position[mark.position.length - 1]
+    mp.osd_message('Jumping: ' + mark.name + ' @ ' + posToStamp(pos));
+    loadFile(mark.path, pos);
   } else {
-    mp.osd_message('No playing detected, aborting')
+    mp.osd_message('No bookmarks found!');
   }
 }
 
 mp.add_key_binding(null, 'marker-show', showMenu);
 mp.add_key_binding(null, 'marker-save', saveBookmark);
+mp.add_key_binding(null, 'marker-watch-later', function() {
+  saveBookmark();
+  mp.command('quit');
+});
 mp.add_key_binding(null, 'marker-load', loadBookmark);

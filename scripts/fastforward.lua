@@ -8,6 +8,7 @@
 local decay_delay = .05 -- rate of time by which playback speed is decreased
 local speed_increments = .2 -- amount by which playback speed is increased each time
 local speed_decrements = .4 -- amount by which playback speed is decreased each time
+local start_rate = 1.5
 local max_rate = 3 -- will not exceed this rate
 local inertial_decay = false -- changes the behavior of speed decay
 
@@ -22,7 +23,11 @@ local function inc_speed()
         auto_dec_timer:kill()
     end
 
-    local new_speed = mp.get_property("speed") + speed_increments
+    if mp.get_property_native("speed") <= 1 then
+        mp.set_property("speed", start_rate - speed_increments)
+    end
+
+    local new_speed = mp.get_property_native("speed") + speed_increments
 
     if new_speed > max_rate - speed_increments then
         new_speed = max_rate

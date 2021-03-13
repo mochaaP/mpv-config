@@ -8,7 +8,7 @@ local ON_WINDOWS = package.config:sub(1,1) ~= "/"
 local options = {
     server_address = "https://sponsor.ajay.app",
 
-    python_path = "C:\\Python38\\python.exe",
+    python_path = "C:\\Program Files\\Python38\\python.exe",
 
     -- Categories to fetch
     categories = "sponsor,intro,outro,interaction,selfpromo",

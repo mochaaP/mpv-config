@@ -18,29 +18,13 @@ function getOption()
 }
 getOption();
 
-var ss_file = mp.utils.getenv("TEMP") + "\\mpv-ss-2-cb.png";
+var ss_file = mp.utils.getenv("TEMP") + "\\mpv-clip.png";
 
-function ss_2_cb()
-{
+function ss_2_cb() {
+    mp.commandv("show-text", "Snipping…")
     mp.commandv("osd-msg", "screenshot-to-file", ss_file);
     mp.utils.subprocess_detached({"args" : [nircmdc, "clipboard", "copyimage",
         ss_file]});
 }
 
-function ss_2_cb_video()
-{
-    mp.commandv("osd-msg", "screenshot-to-file", ss_file, "video");
-    mp.utils.subprocess_detached({"args" : [nircmdc, "clipboard", "copyimage",
-        ss_file]});
-}
-
-function ss_2_cb_window()
-{
-    mp.commandv("osd-msg", "screenshot-to-file", ss_file, "window");
-    mp.utils.subprocess_detached({"args" : [nircmdc, "clipboard", "copyimage",
-        ss_file]});
-}
-
-mp.add_key_binding("s", "screenshot-to-clipboard", ss_2_cb);
-mp.add_key_binding("S", "screenshot-to-clipboard_video", ss_2_cb_video);
-mp.add_key_binding("ctrl+s", "screenshot-to-clipboard_window", ss_2_cb_window);
+mp.add_key_binding(null, "screenshot-to-clipboard", ss_2_cb);
